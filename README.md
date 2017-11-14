@@ -13,7 +13,7 @@ We create a single application load balancer for our cluster. The idea is that
 each service running in the cluster will leverage path or host based routing with its own Target Group.
 
 Please refer to this AWS Blog [post](https://aws.amazon.com/blogs/devops/introducing-application-load-balancer-unlocking-and-optimizing-architectures/) for more information about this architecture
-![Application Load Balancer](![Task Definition Alt](images/Task Definition Alt.png))
+![Application Load Balancer](https://dmhnzl5mp9mj6.cloudfront.net/application-management_awsblog/images/img6.png)
 
 #### Security
 
