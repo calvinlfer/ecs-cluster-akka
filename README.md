@@ -14,7 +14,7 @@ each service running in the cluster will leverage path or host based routing wit
 
 Please refer to this AWS Blog [post](https://aws.amazon.com/blogs/devops/introducing-application-load-balancer-unlocking-and-optimizing-architectures/) for more information about this architecture
 
-![Application Load Balancer](https://dmhnzl5mp9mj6.cloudfront.net/application-management_awsblog/images/img6.png)
+![Application Load Balancer](https://user-images.githubusercontent.com/14280152/32806210-c0cb367c-c959-11e7-853c-65813d3ff39e.png)
 
 #### Security
 
