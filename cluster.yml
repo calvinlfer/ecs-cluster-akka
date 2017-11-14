@@ -29,13 +29,13 @@ Parameters:
   UseSSL:
     Type: String
     Default: 'yes'
-    Description: Use SSL to serve traffic?
+    Description: Use SSL to serve traffic? Do not specify Certificate ARN if you select no.
     AllowedValues:
     - 'yes'
     - 'no'
   CertificateArn:
     Type: String
-    Description: SSL certificates ARN to assign to ALB (See Certificate Mangager for the ARN)
+    Description: SSL certificates ARN to assign to ALB (See Certificate Mangager for the ARN). Leave empty if UseSSL=no
   LoadBalancerSubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
     Description: Subnet in which to create load balancer instances
