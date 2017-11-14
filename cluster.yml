@@ -21,15 +21,21 @@ Parameters:
   InstanceSubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
     Description: Subnet in which to create container instances
-
   LoadBalancerType:
-      Type: String
-      Description: ECS ALB type
-      Default: internal
-      AllowedValues: [internet-facing, internal]
+    Type: String
+    Description: ECS ALB type
+    Default: internal
+    AllowedValues: [internet-facing, internal]
+  UseSSL:
+    Type: String
+    Default: 'yes'
+    Description: Use SSL to serve traffic?
+    AllowedValues:
+    - 'yes'
+    - 'no'
   CertificateArn:
-      Type: String
-      Description: SSL certificates ARN to assign to ALB (See Certificate Mangager for the ARN)
+    Type: String
+    Description: SSL certificates ARN to assign to ALB (See Certificate Mangager for the ARN)
   LoadBalancerSubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
     Description: Subnet in which to create load balancer instances
@@ -47,8 +53,53 @@ Parameters:
     Default: '2'
   RollingUpdateMinEC2InService:
     Type: Number
-    Description: Desired Capacity minimum instance in service during rolling update 
+    Description: Number of instances to keep in service during updates 
     Default: '2'
+Metadata: 
+  AWS::CloudFormation::Interface: 
+    ParameterGroups: 
+      - Label: 
+          default: "Cluster"
+        Parameters: 
+          - EcsInstanceType
+          - KeyName
+          - InstanceSubnetIds
+          - AsgDesiredSize
+          - AsgMinSize
+          - AsgMaxSize
+          - RollingUpdateMinEC2InService
+      - Label: 
+          default: "Load Balancer"
+        Parameters: 
+          - LoadBalancerType
+          - LoadBalancerSubnetIds
+          - UseSSL
+          - CertificateArn
+      - Label:
+          default: "VPC"
+        Parameters:
+          - VpcId    
+    ParameterLabels: 
+      EcsInstanceType: 
+        default: "Instance Type"
+      InstanceSubnetIds:
+        default: "Subnets" 
+      AsgMinSize:
+        default: "Min Size"
+      AsgMaxSize:
+        default: "Max Size"
+      AsgDesiredSize:
+        default: "Desired Size"
+      RollingUpdateMinEC2InService:
+        default: "Min Instances In Service"
+      LoadBalancerSubnetIds:
+        default: "Subnets"
+      LoadBalancerType:
+        default: "External or Internal?"
+      UseSSL:
+        default: "Enable SSL?"        
+      CertificateArn:
+        default: "Certificate for SSL"                  
 Mappings:
 
     # These are the latest ECS optimized AMIs as of Nov 2017:
@@ -87,7 +138,9 @@ Mappings:
         AMI: ami-c8c98bab
       ca-central-1:
         AMI: ami-fc5fe798
-
+Conditions:
+  EnableSSL: !Equals [!Ref 'UseSSL', 'yes']
+  DisableSSL: !Not [!Condition EnableSSL]
 Resources:
   # Security Groups
   #   - Load Balancer Security Group
@@ -138,6 +191,24 @@ Resources:
         - Key: Name
           Value: !Sub 'ECS Load Balancer SG - ${AWS::StackName}'
 
+  LoadBalancerHTTPIngress:
+    Condition: DisableSSL
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref LoadBalancerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: 0.0.0.0/0
+  LoadBalancerHTTPSIngress:
+    Condition: EnableSSL
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref LoadBalancerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: 0.0.0.0/0      
   # Application Load Balancer
   # All services in this cluster should use this ALB
   LoadBalancer:
@@ -153,14 +224,25 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
       Certificates:
-      - CertificateArn: !Ref 'CertificateArn'
+        Fn::If:
+        - EnableSSL
+        -
+          - CertificateArn: !Ref 'CertificateArn'
+        - !Ref AWS::NoValue
       DefaultActions:
       - Type: forward
         TargetGroupArn: !Ref 'DefaultTargetGroup'
       LoadBalancerArn: !Ref 'LoadBalancer'
-      Port: '443'
-      Protocol: HTTPS
-
+      Port: 
+        Fn::If:
+        - EnableSSL
+        - '443'
+        - '80'
+      Protocol: 
+        Fn::If:
+        - EnableSSL
+        - HTTPS
+        - HTTP
   # Must have a Target group under our listener's DefaultAction
   # This target group is not used, each service should create its own target group
 
