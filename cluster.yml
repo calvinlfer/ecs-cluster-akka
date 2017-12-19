@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: AWS CloudFormation template to create resources for an ECS cluster in an existing VPC.
+Description: AWS CloudFormation template to create resources for an ECS cluster in an existing VPC with Memory based AutoScaling.
 Parameters:
   EcsInstanceType:
     Type: String
@@ -21,6 +21,16 @@ Parameters:
   InstanceSubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
     Description: Subnet in which to create container instances
+  AllowSSH:
+    Type: String
+    Default: 'yes'
+    Description: Allows SSH access to cluster instances?
+    AllowedValues:
+    - 'yes'
+    - 'no'    
+  BastionSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Bastion Hosts security group Id. Leave empty if not required
   LoadBalancerType:
     Type: String
     Description: ECS ALB type
@@ -55,6 +65,10 @@ Parameters:
     Type: Number
     Description: Number of instances to keep in service during updates 
     Default: '2'
+  CloudFormationLogGroup:
+    Description: Name of CloudFormation log group. All cloud-init based logs will be sent here
+    Type: String
+    Default: 'CloudFormation'    
 Metadata: 
   AWS::CloudFormation::Interface: 
     ParameterGroups: 
@@ -68,6 +82,8 @@ Metadata:
           - AsgMinSize
           - AsgMaxSize
           - RollingUpdateMinEC2InService
+          - AllowSSH
+          - BastionSecurityGroupId
       - Label: 
           default: "Load Balancer"
         Parameters: 
@@ -90,6 +106,8 @@ Metadata:
         default: "Max Size"
       AsgDesiredSize:
         default: "Desired Size"
+      AllowSSH:
+        default: "Allow SSH ?"  
       RollingUpdateMinEC2InService:
         default: "Min Instances In Service"
       LoadBalancerSubnetIds:
@@ -141,6 +159,7 @@ Mappings:
 Conditions:
   EnableSSL: !Equals [!Ref 'UseSSL', 'yes']
   DisableSSL: !Not [!Condition EnableSSL]
+  EnableSSH: !Equals [!Ref 'AllowSSH', 'yes']
 Resources:
   # Security Groups
   #   - Load Balancer Security Group
@@ -156,6 +175,10 @@ Resources:
         FromPort: 32768
         ToPort: 61000
         SourceSecurityGroupId: !Ref 'LoadBalancerSecurityGroup'
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        SourceSecurityGroupId: !Ref 'BastionSecurityGroupId'        
       Tags:
       - Key: Name
         Value: !Sub 'ECS Container Instance SG - ${AWS::StackName}'
@@ -163,14 +186,20 @@ Resources:
   EcsInstanceIngress:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
-      GroupId:
-        Ref: EcsSecurityGroup
+      GroupId: !Ref 'EcsSecurityGroup'
       IpProtocol: tcp
       FromPort: 32768
       ToPort: 61000
-      SourceSecurityGroupId:
-        Ref: EcsSecurityGroup    
-
+      SourceSecurityGroupId: !Ref 'EcsSecurityGroup'    
+  EcsInstanceSSHIngress:
+    Condition: EnableSSH
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref 'EcsSecurityGroup'
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+      SourceSecurityGroupId: !Ref 'BastionSecurityGroupId'    
   # Application Load Balancer
   LoadBalancerSecurityGroup:
       Type: AWS::EC2::SecurityGroup
@@ -259,7 +288,6 @@ Resources:
       HealthyThresholdCount: 4
 
   # ECS Resources
-
   Cluster:
     Type: AWS::ECS::Cluster
     Properties:
@@ -377,6 +405,42 @@ Resources:
                         log_group_name = /var/log/ecs/audit.log
                         log_stream_name = {cluster}/{container_instance_id}
                         datetime_format = %Y-%m-%dT%H:%M:%SZ
+                        
+                        [/var/log/cloud-init.log]
+                        file = /var/log/cloud-init.log
+                        log_group_name = ${CloudFormationLogGroup}
+                        log_stream_name = {instance_id}/cloud-init.log
+                        datetime_format =
+        
+                        [/var/log/cloud-init-output.log]
+                        file = /var/log/cloud-init-output.log
+                        log_group_name = ${CloudFormationLogGroup}
+                        log_stream_name = {instance_id}/cloud-init-output.log
+                        datetime_format =
+        
+                        [/var/log/cfn-init.log]
+                        file = /var/log/cfn-init.log
+                        log_group_name = ${CloudFormationLogGroup}
+                        log_stream_name = {instance_id}/cfn-init.log
+                        datetime_format =
+        
+                        [/var/log/cfn-init-cmd.log]
+                        file = /var/log/cfn-init-cmd.log
+                        log_group_name = ${CloudFormationLogGroup}
+                        log_stream_name = {instance_id}/cfn-init-cmd.log
+                        datetime_format =                
+        
+                        [/var/log/cfn-hup.log]
+                        file = /var/log/cfn-hup.log
+                        log_group_name = ${CloudFormationLogGroup}
+                        log_stream_name = {instance_id}/cfn-hup.log
+                        datetime_format =
+        
+                        [/var/log/cfn-wire.log]
+                        file = /var/log/cfn-wire.log
+                        log_group_name = ${CloudFormationLogGroup}
+                        log_stream_name = {instance_id}/cfn-wire.log
+                        datetime_format =
                   "/etc/init/awslogs.conf":
                       mode: 000644
                       owner: root
@@ -500,9 +564,9 @@ Resources:
         StepAdjustments:
         - MetricIntervalLowerBound: '0'
           MetricIntervalUpperBound: '10'
-          ScalingAdjustment: '10'
-        - MetricIntervalLowerBound: '10'
           ScalingAdjustment: '50'
+        - MetricIntervalLowerBound: '10'
+          ScalingAdjustment: '100'
   
   MemScaleDownPolicy:
     Type: AWS::AutoScaling::ScalingPolicy
@@ -528,7 +592,7 @@ Resources:
       Namespace: AWS/ECS
       Statistic: Average
       Period: '60'
-      EvaluationPeriods: '2'
+      EvaluationPeriods: '3'
       Threshold: '60'
       ComparisonOperator: GreaterThanThreshold
       Dimensions:
@@ -568,6 +632,11 @@ Outputs:
     Value: !GetAtt [LoadBalancer, DNSName]
     Export:
       Name: !Sub '${AWS::StackName}-LoadBalancerDNSName'
+  LoadBalancerCanonicalHostedZoneID:
+    Description: The hosted zone id of the app load balancer for the service
+    Value: !GetAtt [LoadBalancer, CanonicalHostedZoneID]
+    Export:
+      Name: !Sub '${AWS::StackName}-LoadBalancerCanonicalHostedZoneID'           
   InstanceSecurityGroup:
     Description: The ID of the ecs container instance security group created
     Value: !GetAtt [EcsSecurityGroup, GroupId]
